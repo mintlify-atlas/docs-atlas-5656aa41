@@ -1,0 +1,96 @@
+---
+title: "Interpreting detection tool output and results"
+description: "Understand each stage of the cPanel/WHM CVE-2026-41940 detection output, from session minting to root access verification, and what each result means."
+---
+
+The tool prints a line for each exploitation stage as it executes. Each stage either succeeds and continues to the next, or prints an error message and exits with a non-zero status code. Understanding each line tells you exactly how far the exploit chain progressed and whether the target is vulnerable.
+
+## Sample output
+
+```text
+                     __         ___  ___________
+         __  _  ______ _/  |__ ____ |  |_\__    ____\____  _  ________
+         \ \/ \/ \__  \    ___/ ___\|  |  \|    | /  _ \ \/ \/ \_  __ \
+          \     / / __ \|  | \  \___|   Y  |    |(  <_> \     / |  | \/
+           \/\_/ (____  |__|  \___  |___|__|__  | \__  / \/\_/  |__|
+                          \/          \/     \/
+
+        watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py
+
+        (*) cPanel/WHM Authentication Bypass - Detection Artifact Generator
+
+          - Sina Kheirkhah (@SinSinology) of watchTowr (@watchTowrcyber)
+
+        CVEs: [cve-2026-41940]
+
+[0] hostname = target.example.com
+[1] minting a preauth session...
+    session base = :vQ2WC5Bexp0oFSa7
+[2] sending the CRLF injection (Basic auth + no-ob cookie)...
+    HTTP 307, leaked token = /cpsess5691070609
+[3] firing do_token_denied to propagate raw -> cache...
+    HTTP 401, gadget fired
+[4] verifying we're WHM root...
+    /json-api/version -> HTTP 200  {"version":"11.110.0.89"}
+
+[+] now just login to https://target:2087/ and use the terminal option to get a root shell
+```
+
+## Stage-by-stage breakdown
+
+<AccordionGroup>
+  <Accordion title="[0] hostname">
+    The canonical hostname that will be used in every `Host:` header for the rest of the run. This is either the value passed via `--hostname` or the result of `discover_canonical_host()`, which follows cpsrvd's 307 redirect from `/openid_connect/cpanelid`.
+
+    If this value looks wrong (e.g. it shows an internal hostname you cannot reach), use `--hostname` to override it. See [Advanced options](/usage/advanced-options) for details.
+  </Accordion>
+
+  <Accordion title="[1] minting a preauth session">
+    The tool sends a `POST` to `/login/?login_only=1` with intentionally wrong credentials (`user=root`, `pass=wrong`). Even with a failed login, cpsrvd issues a `whostmgrsession` cookie.
+
+    The printed `session base` (e.g. `:vQ2WC5Bexp0oFSa7`) is the raw cookie value with the obfuscation tail stripped. A normal cookie looks like `<base>,<obhex>` — the `,<obhex>` suffix causes cpsrvd's encoder to apply obfuscation on subsequent requests. Removing it is what makes the CRLF injection in stage 2 possible.
+  </Accordion>
+
+  <Accordion title="[2] CRLF injection">
+    A `GET /` request is sent with:
+    - An `Authorization: Basic` header whose base64 payload decodes to a forged session block containing CRLF sequences and elevated flags (`hasroot=1`, `tfa_verified=1`)
+    - The raw (non-obfuscated) `whostmgrsession` cookie from stage 1
+
+    cpsrvd processes the forged Basic auth payload and responds with a 307. The `Location` header in that redirect contains the security token — a path like `/cpsess5691070609` (the prefix `/cpsess` followed by a 10-digit number).
+
+    **`HTTP 307, leaked token = /cpsess<10 digits>`** means the CRLF injection succeeded and the security token has been extracted from the server's response.
+  </Accordion>
+
+  <Accordion title="[3] do_token_denied gadget">
+    The tool makes a `GET /scripts2/listaccts` request using the same raw session cookie. The `listaccts` endpoint triggers cpsrvd's `do_token_denied` code path when no valid security token is present in the URL, which has the side effect of writing the forged session data from stage 2 into the session cache.
+
+    **`HTTP 401, gadget fired`** means the server returned 401 with a body containing `Token denied` or `WHM Login` — confirming the gadget executed and the session has been promoted from a transient raw state into persistent cache storage. The session is now a fully authenticated root session.
+  </Accordion>
+
+  <Accordion title="[4] verification">
+    The tool calls `{token}/json-api/version` using the leaked security token and the cached session cookie. This is a standard WHM JSON API endpoint that returns the server's cPanel/WHM version and requires a valid authenticated root session.
+
+    **`HTTP 200 {"version":"11.110.0.89"}`** confirms that:
+    - The security token from stage 2 is accepted
+    - The session cookie is recognized as an authenticated root session
+    - The server is running a vulnerable version of cPanel/WHM
+
+    A response of HTTP 500 or 503 with `License` in the body is also treated as a pass — it means authentication succeeded but the specific API call is blocked by a license restriction.
+  </Accordion>
+</AccordionGroup>
+
+## Failure messages
+
+If any stage fails, the tool prints an error and exits with status code 1. The message identifies exactly which stage failed.
+
+| Message | Stage | Meaning |
+|---|---|---|
+| `[!] couldn't reach the target` | Pre-stage | Network connection to the target failed. Check the address, port, and any firewall rules. |
+| `[!] /login didn't issue a whostmgrsession cookie` | Stage 1 | cpsrvd did not set a `whostmgrsession` cookie on the failed login response. This can indicate a patched server, a WAF blocking the request, or an endpoint that has changed. |
+| `[!] no /cpsess token leaked` | Stage 2 | The 307 redirect from `/` did not contain a `/cpsess` token in its `Location` header. The CRLF injection did not succeed — the target is likely patched. |
+| `[!] do_token_denied didn't fire as expected` | Stage 3 | The `/scripts2/listaccts` request did not return the expected 401 with `Token denied` or `WHM Login` in the body. The gadget was not triggered. |
+| `[!] auth bypass didn't land, not running the action` | Stage 4 | The `/json-api/version` call returned a status code that does not indicate successful authentication. The bypass chain completed earlier stages but root access was not confirmed. |
+
+<Info>
+  A final `[+] now just login to <target> and use the terminal option to get a root shell` message means all four stages passed and root-level access to the WHM instance was confirmed via the JSON API. The session cookie and security token obtained during the run are valid for the duration of the cpsrvd session timeout.
+</Info>

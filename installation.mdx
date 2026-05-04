@@ -1,0 +1,97 @@
+---
+title: "Install the cPanel/WHM CVE-2026-41940 detection tool"
+description: "Set up Python dependencies and clone the watchTowr CVE-2026-41940 detection script. Requires Python 3.6+ and the requests and urllib3 libraries."
+---
+
+The CVE-2026-41940 detection tool is a single-file Python script with minimal external dependencies. There is no package to install and no build step — clone the repository, install two libraries, and the tool is ready to run.
+
+## Requirements
+
+Before installing, confirm your environment meets the following requirements:
+
+- **Python 3.6+** — the script uses f-strings and `urllib.parse`, both available from Python 3.6 onward.
+- **`requests` library** — handles all HTTP communication with the target.
+- **`urllib3` library** — used to suppress SSL certificate warnings when connecting to self-signed WHM endpoints.
+- **Network access to the target on port 2087** — the default WHM port. Ensure no firewall or VPN blocks outbound connections to this port from your machine.
+
+<Note>
+  SSL certificate warnings are suppressed automatically. The script calls `urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)` at startup, so self-signed certificates on WHM instances do not interrupt the tool.
+</Note>
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/watchtowrlabs/watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py
+    cd watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py
+    ```
+  </Step>
+
+  <Step title="Install Python dependencies">
+    Install both required libraries using pip:
+
+    ```bash
+    pip install requests urllib3
+    ```
+
+    If you are using a virtual environment (recommended), activate it first:
+
+    ```bash
+    python -m venv venv
+    source venv/bin/activate   # on Windows: venv\Scripts\activate
+    pip install requests urllib3
+    ```
+
+    <Tip>
+      Using a virtual environment keeps the tool's dependencies isolated from your system Python and other projects. This is the recommended approach, especially if you run multiple security tools on the same machine.
+    </Tip>
+  </Step>
+
+  <Step title="Verify the installation">
+    Run the script with the `--help` flag to confirm Python can find all dependencies and the argparse interface is available:
+
+    ```bash
+    python watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py --help
+    ```
+
+    You should see the banner printed first, followed by the argument help text:
+
+    ```
+                         __         ___  ___________
+             __  _  ______ _/  |__ ____ |  |_\__    ____\____  _  ________
+             \ \/ \/ \__  \    ___/ ___\|  |  \|    | /  _ \ \/ \/ \_  __ \
+              \     / / __ \|  | \  \___|   Y  |    |(  <_> \     / |  | \/
+               \/\_/ (____  |__|  \___  |___|__|__  | \__  / \/\_/  |__|
+                              \/          \/     \/
+
+            watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py
+
+            (*) cPanel/WHM Authentication Bypass - Detection Artifact Generator
+
+              - Sina Kheirkhah (@SinSinology) of watchTowr (@watchTowrcyber)
+
+            CVEs: [cve-2026-41940]
+
+    usage: watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py [-h] --target TARGET [--hostname HOSTNAME]
+
+    options:
+      -h, --help           show this help message and exit
+      --target TARGET      WHM URL, e.g. https://target:2087
+      --hostname HOSTNAME  override Host: header (auto-discovered if empty)
+    ```
+
+    If you see an `ImportError` for `requests` or `urllib3`, re-run the pip install step and confirm you are using the correct Python environment.
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first detection against a target with a guided walkthrough.
+  </Card>
+  <Card title="Basic usage" icon="terminal" href="/usage/basic-usage">
+    All available flags and target format options.
+  </Card>
+</CardGroup>

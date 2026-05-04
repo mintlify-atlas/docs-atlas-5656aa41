@@ -1,133 +1,54 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "cPanel/WHM CVE-2026-41940 AuthBypass Detection Tool"
+description: "Security research tool by watchTowr Labs that detects and demonstrates the CVE-2026-41940 authentication bypass vulnerability in cPanel/WHM."
 ---
 
-## Setting up
+This tool, developed by [watchTowr Labs](https://labs.watchtowr.com/), provides a detection artifact generator for **CVE-2026-41940** — a critical authentication bypass vulnerability in cPanel/WHM. By exploiting a CRLF injection flaw, an unauthenticated attacker can forge session credentials and gain root-level WHM access without any valid credentials.
 
-Get your documentation site up and running in minutes.
+<Warning>
+  This tool is provided for **authorized security research and detection purposes only**. Only run it against systems you own or have explicit written permission to test. Unauthorized use is illegal.
+</Warning>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Run your first detection check against a cPanel/WHM target in minutes
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Vulnerability Overview" icon="shield-exclamation" href="/vulnerability-overview">
+    Understand the CVE-2026-41940 authentication bypass and its impact
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Usage Guide" icon="terminal" href="/usage/basic-usage">
+    Learn all CLI flags, options, and how to interpret tool output
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Technical Details" icon="microscope" href="/technical/exploit-chain">
+    Explore the four-stage exploit chain and the underlying mechanics
   </Card>
-</Columns>
+  <Card title="Installation" icon="download" href="/installation">
+    Set up dependencies and prepare your environment
+  </Card>
+  <Card title="Remediation" icon="wrench" href="/remediation">
+    Steps to patch affected cPanel/WHM instances and verify fixes
+  </Card>
+</CardGroup>
 
-## Create beautiful pages
+## How it works
 
-Everything you need to create world-class documentation.
+The tool chains four discrete stages to verify whether a cPanel/WHM instance is susceptible to the authentication bypass:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+<Steps>
+  <Step title="Mint a pre-auth session">
+    A failed login to `/login/?login_only=1` causes cpsrvd to issue a `whostmgrsession` cookie. The tool extracts the session base token from the raw response header.
+  </Step>
+  <Step title="CRLF injection via Basic auth">
+    A crafted `Authorization: Basic` header containing CRLF sequences is sent alongside the session cookie. This injects forged authentication fields into the session file, including `user=root` and `hasroot=1`.
+  </Step>
+  <Step title="Propagate to session cache">
+    A request to `/scripts2/listaccts` triggers the `do_token_denied` gadget, which promotes the raw injected session into the server's cache — making it authoritative.
+  </Step>
+  <Step title="Verify root access">
+    The tool calls `/json-api/version` using the leaked `cp_security_token`. A `200 OK` response with a valid version payload confirms unauthenticated root-level WHM access was achieved.
+  </Step>
+</Steps>
 
-## Make your content agent ready
-
-Make your docs work for humans and AI agents alike.
-
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Info>
+  For the full technical write-up and research context, visit the [watchTowr Labs blog](https://labs.watchtowr.com/).
+</Info>

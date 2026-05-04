@@ -1,0 +1,97 @@
+---
+title: "Patch and remediate CVE-2026-41940 in cPanel/WHM"
+description: "Steps to update cPanel/WHM to a patched version, verify the fix, restrict WHM port access, and confirm your server is no longer vulnerable to the auth bypass."
+---
+
+The only complete fix for CVE-2026-41940 is upgrading cPanel/WHM to a patched version. cPanel released a security update on **2026-04-28** that resolves the CRLF injection flaw underlying the authentication bypass. No configuration change or workaround substitutes for applying the patch.
+
+<Info>
+  Official advisory: [cPanel/WHM Security Update 04-28-2026](https://support.cpanel.net/hc/en-us/articles/40073787579671-cPanel-WHM-Security-Update-04-28-2026)
+</Info>
+
+## Update cPanel/WHM
+
+<Steps>
+  <Step title="Log in to WHM as root">
+    Open your browser and navigate to `https://<your-server>:2087`. Log in using the `root` system account credentials.
+  </Step>
+  <Step title="Run the upgrade">
+    Navigate to **Home > cPanel > Upgrade to Latest Version** in the WHM interface, or run the following command directly on the server:
+
+    ```bash
+    sudo /scripts/upcp --force
+    ```
+
+    The `--force` flag bypasses the tier check and applies all available updates immediately.
+  </Step>
+  <Step title="Verify the installed version">
+    After the upgrade completes, confirm the new version by checking the WHM UI under **Home > Server Information**, or run the following on the server itself to read the installed version directly:
+
+    ```bash
+    cat /usr/local/cpanel/version
+    ```
+
+    Compare the installed build against the patched versions listed in the [official advisory](https://support.cpanel.net/hc/en-us/articles/40073787579671-cPanel-WHM-Security-Update-04-28-2026).
+  </Step>
+</Steps>
+
+## Verify the patch
+
+Re-run the detection tool against the updated server. On a patched instance, the CRLF injection in stage 2 no longer causes the server to leak a `cp_security_token`, and the tool exits early with:
+
+```
+[2] sending the CRLF injection (Basic auth + no-ob cookie)...
+[!] no /cpsess token leaked (HTTP 200). target may be patched.
+```
+
+This output confirms that the forged `Authorization: Basic` header is no longer processed by cpsrvd in a way that injects fields into the session file. The vulnerability is remediated.
+
+<Note>
+  Run the tool with the same `--target` flag you used during initial detection: `python watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py --target https://<your-server>:2087`
+</Note>
+
+## Network-level mitigations
+
+While the patch is the only true fix, restricting network access to the WHM port reduces the attack surface until the upgrade can be applied.
+
+Restrict port 2087 to trusted IP addresses using `iptables`:
+
+```bash
+# Allow access from a trusted management IP
+iptables -I INPUT -p tcp --dport 2087 -s <trusted-ip>/32 -j ACCEPT
+
+# Drop all other connections to port 2087
+iptables -I INPUT -p tcp --dport 2087 -j DROP
+```
+
+Or with `ufw`:
+
+```bash
+# Deny access by default, then allow trusted IPs
+ufw deny 2087
+ufw allow from <trusted-ip> to any port 2087
+```
+
+<Warning>
+  Network-level rules reduce exposure but do **not** fix the underlying vulnerability. An attacker with access to an allowed IP range can still exploit the flaw. Apply the cPanel security update as soon as possible.
+</Warning>
+
+## Check for indicators of compromise
+
+If you suspect the vulnerability was exploited before patching, review the following.
+
+**WHM access logs** — look for a `POST /login` request followed immediately by a `GET /` request carrying an `Authorization: Basic` header from the same source IP:
+
+```bash
+grep -E "(POST /login|GET / )" /usr/local/cpanel/logs/access_log | less
+```
+
+**Unusual `cp_security_token` patterns** — legitimate tokens follow `/cpsessNNNNNNNNNN` format with a 10-digit timestamp. Look for tokens that appeared without a corresponding successful login event.
+
+**Unexpected password changes** — check for `passwd` WHM API calls in the access log, which the tool's optional `do_passwd` action uses to change the root password:
+
+```bash
+grep "json-api/passwd" /usr/local/cpanel/logs/access_log
+```
+
+Any `passwd` API call that does not correspond to a known administrative action should be treated as a confirmed compromise indicator.

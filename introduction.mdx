@@ -1,0 +1,44 @@
+---
+title: "watchTowr vs cPanel/WHM: CVE-2026-41940 auth bypass tool"
+description: "watchTowr Labs' detection tool for CVE-2026-41940, a critical cPanel/WHM authentication bypass enabling unauthenticated root access via CRLF injection."
+---
+
+This tool was built by [watchTowr Labs](https://labs.watchtowr.com/) researcher Sina Kheirkhah ([@SinSinology](https://x.com/SinSinology)) to detect whether a cPanel/WHM instance is vulnerable to CVE-2026-41940. The tool operates as a detection artifact generator: it attempts to reproduce the authentication bypass and reports whether the target is susceptible — without performing destructive actions.
+
+## What is CVE-2026-41940?
+
+CVE-2026-41940 is a critical authentication bypass in cPanel/WHM caused by a CRLF injection flaw in the `Authorization` header handling of `cpsrvd`, the WHM daemon. An unauthenticated attacker who can reach port 2087 can inject forged session fields — including `user=root` and `hasroot=1` — into the server's session file. Once the injected session is promoted to cache, the attacker holds a valid root-authenticated WHM session with no credentials required.
+
+The exploit chain proceeds in four stages:
+
+1. Obtain a pre-auth `whostmgrsession` cookie via a failed login
+2. Inject CRLF payloads into the session file via a crafted `Authorization: Basic` header
+3. Trigger a `do_token_denied` gadget to propagate the raw session into the server's cache
+4. Confirm root WHM access via the `/json-api/version` endpoint
+
+## Affected versions
+
+Refer to the official cPanel security advisory for the full list of affected and patched builds:
+
+[cPanel/WHM Security Update — 04-28-2026](https://support.cpanel.net/hc/en-us/articles/40073787579671-cPanel-WHM-Security-Update-04-28-2026)
+
+<Warning>
+  This tool is provided for **authorized security research and detection purposes only**. You must only run it against systems you own or have explicit written permission to test. Unauthorized use is illegal and may violate computer fraud laws in your jurisdiction. watchTowr Labs accepts no liability for misuse.
+</Warning>
+
+## Explore the documentation
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first detection check against a cPanel/WHM target in minutes
+  </Card>
+  <Card title="Vulnerability overview" icon="shield-exclamation" href="/vulnerability-overview">
+    Full technical breakdown of CVE-2026-41940, affected scope, and impact
+  </Card>
+  <Card title="Exploit chain" icon="microscope" href="/technical/exploit-chain">
+    Step-by-step walkthrough of the four-stage detection chain
+  </Card>
+  <Card title="Remediation" icon="wrench" href="/remediation">
+    How to patch affected instances and verify the fix
+  </Card>
+</CardGroup>

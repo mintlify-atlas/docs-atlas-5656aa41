@@ -1,0 +1,78 @@
+---
+title: "Advanced options for the WHM auth bypass detector"
+description: "Use --hostname to override Host header auto-discovery when the WHM server redirects to a different canonical hostname or when testing behind a proxy."
+---
+
+When hostname auto-discovery fails — or when the target sits behind a NAT device or reverse proxy — you can supply the canonical hostname directly with `--hostname`. This tells the tool which value to place in the `Host:` header without relying on cpsrvd's redirect.
+
+## When to use --hostname
+
+cpsrvd issues a 307 redirect when it receives a request with an unexpected `Host:` header. The tool's `discover_canonical_host()` function exploits this behaviour to learn the right hostname automatically. In most direct-access scenarios you never need `--hostname`.
+
+However, auto-discovery can fail in two common cases:
+
+- **NAT or reverse proxy** — the 307 redirect points to a hostname that is not reachable from the attacker's network, so the tool cannot follow it or may receive no redirect at all.
+- **Split-DNS or multi-homed servers** — the canonical hostname differs from the IP address used to connect, and the redirect target resolves to a different host.
+
+In these situations, supply the hostname that cpsrvd expects:
+
+```bash
+python watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py \
+  --target https://192.168.1.100:2087/ \
+  --hostname myserver.example.com
+```
+
+The tool will connect to `192.168.1.100:2087` for every request but will send `Host: myserver.example.com:2087`, matching what cpsrvd expects.
+
+## How hostname discovery works
+
+When `--hostname` is not provided, the tool calls `discover_canonical_host()`:
+
+<Steps>
+  <Step title="Send a probe request">
+    A `GET` request is issued to `{scheme}://{host}:{port}/openid_connect/cpanelid` with `allow_redirects=False` so the redirect is captured rather than followed.
+  </Step>
+  <Step title="Read the Location header">
+    cpsrvd responds with a 307 and a `Location` header containing the canonical URL, for example `https://myserver.example.com:2087/openid_connect/cpanelid`.
+  </Step>
+  <Step title="Extract the hostname">
+    A regex `^https?://([^:/]+)` extracts just the hostname portion from the `Location` value.
+  </Step>
+  <Step title="Fall back to the original host">
+    If no redirect is received (e.g. the endpoint responds with 200 or the header is absent), the tool falls back to using the original host value from `--target`.
+  </Step>
+</Steps>
+
+## Testing behind a proxy or NAT
+
+When a proxy or NAT device sits between you and cpsrvd, the tool's TCP connection always goes to the address in `--target`, but the `Host:` header must match what cpsrvd considers its own canonical name.
+
+The `http()` helper enforces this separation on every request:
+
+```python
+# always send to the IP, but spoof Host so cpsrvd doesn't redirect us
+headers.setdefault("Host", f"{canonical}:{port}")
+```
+
+This means:
+
+- TCP connection → `host` from `--target` (the routable IP or address)
+- `Host:` header → `canonical` (either auto-discovered or from `--hostname`)
+
+The design prevents redirect loops: once the correct hostname is set, cpsrvd stops issuing 307s and processes the request normally.
+
+## SSL/TLS considerations
+
+All requests are made with `verify=False`. This is intentional — self-signed certificates are the default in WHM installations, and requiring a valid certificate would prevent detection against the vast majority of real-world targets.
+
+urllib3 warnings about unverified HTTPS connections are suppressed automatically at startup:
+
+```python
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+```
+
+No action is required on your part. If you need to capture the raw TLS handshake for a separate analysis, run the tool through a local proxy such as Burp Suite in transparent mode.
+
+<Tip>
+  Before running the tool, verify basic connectivity with `curl -k -I https://target:2087/` to confirm the port is open and cpsrvd is responding. A connection timeout at this stage usually means a firewall rule or wrong port, not a patched server.
+</Tip>

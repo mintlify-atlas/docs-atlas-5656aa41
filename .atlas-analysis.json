@@ -1,0 +1,76 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "cPanel/WHM AuthBypass to RCE",
+  "projectDescription": "A security research CLI tool by watchTowr Labs that detects and demonstrates CVE-2026-41940, a critical authentication bypass vulnerability in cPanel/WHM that enables unauthenticated root-level access.",
+  "theme": "aspen",
+  "primaryColor": "#fc6c36",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "vulnerability-overview"
+            ]
+          },
+          {
+            "group": "Getting Started",
+            "pages": [
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Usage",
+            "pages": [
+              "usage/basic-usage",
+              "usage/advanced-options",
+              "usage/output-interpretation"
+            ]
+          },
+          {
+            "group": "Technical Details",
+            "pages": [
+              "technical/exploit-chain",
+              "technical/crlf-injection",
+              "technical/session-mechanics"
+            ]
+          },
+          {
+            "group": "Remediation & References",
+            "pages": [
+              "remediation",
+              "references"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Four-stage authentication bypass exploit chain targeting cPanel/WHM",
+    "Automatic canonical hostname discovery via cpsrvd 307 redirect",
+    "CRLF injection via Basic Authorization header to forge session data",
+    "WHM security token extraction from leaked Location headers",
+    "Cache propagation via do_token_denied gadget",
+    "Root-level WHM API access verification via /json-api/version",
+    "No-authentication-required detection artifact generation",
+    "SSL verification bypass for self-signed certificates"
+  ],
+  "publicApiSurface": [
+    "--target: WHM URL target (required), e.g. https://target:2087",
+    "--hostname: Override Host header (optional, auto-discovered if omitted)",
+    "stage1_preauth(): Mints a pre-auth WHM session and extracts session base token",
+    "stage2_inject(): Sends CRLF injection with Basic auth to leak cp_security_token",
+    "stage3_propagate(): Fires do_token_denied to propagate raw session to cache",
+    "stage4_verify(): Verifies root-level WHM access via JSON API version endpoint",
+    "call_whm_api(): Authenticated WHM JSON API caller using bypassed session",
+    "discover_canonical_host(): Auto-discovers correct hostname from cpsrvd redirect",
+    "parse_target(): Parses scheme, host, and port from target URL"
+  ]
+}

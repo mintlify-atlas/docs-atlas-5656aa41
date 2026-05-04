@@ -1,0 +1,77 @@
+---
+title: "CVE-2026-41940 references and security advisories"
+description: "Official advisories, research credits, and further reading for the cPanel/WHM CVE-2026-41940 authentication bypass vulnerability discovered by watchTowr Labs."
+---
+
+This page collects all official and research references for CVE-2026-41940, the cPanel/WHM authentication bypass vulnerability. Use these links to verify patch status, follow the original research, and understand the vulnerability classes involved.
+
+<Note>
+  CVE-2026-41940 is a pending NVD assignment. CVE details, CVSS score, and affected version ranges may be updated as the National Vulnerability Database processes the entry. Check the official cPanel advisory for the most current information.
+</Note>
+
+## Official advisories
+
+<CardGroup cols={2}>
+  <Card
+    title="cPanel security update 04-28-2026"
+    icon="shield-halved"
+    href="https://support.cpanel.net/hc/en-us/articles/40073787579671-cPanel-WHM-Security-Update-04-28-2026"
+  >
+    The official cPanel advisory describing the vulnerability, affected versions, and the patched release issued on 2026-04-28.
+  </Card>
+  <Card
+    title="CVE-2026-41940"
+    icon="triangle-exclamation"
+    href="https://www.cve.org/CVERecord?id=CVE-2026-41940"
+  >
+    CVE identifier for the cPanel/WHM authentication bypass. Full NVD entry pending. Check here for CVSS score and CWE mapping once published.
+  </Card>
+</CardGroup>
+
+## Research
+
+This vulnerability was discovered and responsibly disclosed by **Sina Kheirkhah** ([@SinSinology](https://x.com/SinSinology)) of **watchTowr** ([@watchTowrcyber](https://x.com/watchtowrcyber)).
+
+<CardGroup cols={2}>
+  <Card
+    title="watchTowr Labs blog"
+    icon="flask"
+    href="https://labs.watchtowr.com/"
+  >
+    The watchTowr Labs research blog, where the full technical write-up and analysis for CVE-2026-41940 is published.
+  </Card>
+  <Card
+    title="watchTowr on X"
+    icon="x-twitter"
+    href="https://x.com/watchtowrcyber"
+  >
+    Follow @watchtowrcyber for the latest security research announcements and vulnerability disclosures.
+  </Card>
+  <Card
+    title="Detection tool on GitHub"
+    icon="github"
+    href="https://github.com/watchtowrlabs/watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py"
+  >
+    The open-source detection artifact generator used to verify whether a cPanel/WHM instance is vulnerable to the authentication bypass.
+  </Card>
+</CardGroup>
+
+## Related vulnerability classes
+
+CVE-2026-41940 combines three vulnerability classes that work together across the four-stage exploit chain.
+
+**CRLF injection (CWE-93)** — The root cause. cpsrvd fails to sanitize carriage return and line feed characters (`\r\n`) in the `Authorization: Basic` header before writing them to the session file on disk. This allows an attacker to inject arbitrary key-value pairs — including `user=root`, `hasroot=1`, and `tfa_verified=1` — directly into a legitimate pre-authentication session.
+
+**Session fixation (CWE-384)** — The amplification mechanism. After the CRLF injection writes forged fields into the raw session file, a request to `/scripts2/listaccts` triggers the `do_token_denied` gadget, which promotes the raw session into cpsrvd's authenticated session cache. This fixates the attacker's pre-auth session as a fully authenticated root session without requiring a valid password.
+
+**Improper authentication (CWE-287)** — The net result. Because cpsrvd trusts the session cache values written by earlier stages, subsequent requests using the same session cookie are treated as authenticated root-level WHM access. The server never validated that the credentials used to mint the session were correct.
+
+## Tool
+
+<Card
+  title="watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py"
+  icon="terminal"
+  href="https://github.com/watchtowrlabs/watchTowr-vs-cPanel-WHM-AuthBypass-to-RCE.py"
+>
+  A Python-based detection artifact generator that executes the four-stage exploit chain — pre-auth session minting, CRLF injection, session cache propagation, and root access verification — against a target cPanel/WHM instance to confirm whether it is vulnerable to CVE-2026-41940.
+</Card>
